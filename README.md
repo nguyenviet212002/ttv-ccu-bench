@@ -1,264 +1,252 @@
 # TingTingVac 5K CCU Benchmark Suite
 
-Benchmark suite để chứng minh hệ thống TingTingVac chịu được **5,000 concurrent users** với workload thực tế.
-
-Kết quả đo được từ suite này sẽ được nộp cho Bên A (Mạnh Trường An Co., Ltd.) theo yêu cầu trong thư TTV-FB-5000CCU-2026-002.
+Bộ benchmark chứng minh hệ thống TingTingVac chịu được **5,000 concurrent users** với workload thực tế.  
+Kết quả từ suite này sẽ nộp cho Bên A (Mạnh Trường An Co., Ltd.) theo thư TTV-FB-5000CCU-2026-002.
 
 ---
 
-## Prerequisites
+## Yêu cầu cài đặt (Prerequisites)
 
-| Tool | Version | Install |
+Cài **3 tool** này trước khi chạy:
+
+| Tool | Download | Ghi chú |
 |---|---|---|
-| Docker + Docker Compose | ≥ 24 | https://docs.docker.com/get-docker/ |
-| Node.js | ≥ 20 | https://nodejs.org |
-| k6 | ≥ 0.49 | https://k6.io/docs/get-started/installation/ |
-| psql (optional) | any | included with PostgreSQL client |
+| **Docker Desktop** | https://www.docker.com/products/docker-desktop/ | Bật WSL2 khi cài. Sau khi cài phải **mở Docker Desktop** trước khi chạy lệnh |
+| **Node.js 20 LTS** | https://nodejs.org | Chọn bản LTS |
+| **k6** | https://dl.k6.io/msi/k6-latest-amd64.msi | Tải file .msi, cài xong restart terminal |
 
-### OS tuning (required for B4 and B8)
-
-```bash
-# File descriptor limit — required for 10,000+ WebSocket connections
-ulimit -n 65536
-
-# Persist across reboots:
-sudo tee /etc/security/limits.d/ttv-bench.conf << 'EOF'
-*  soft  nofile  65536
-*  hard  nofile  65536
-EOF
-
-# TCP port range for k6 outbound connections
-sudo sysctl -w net.ipv4.ip_local_port_range="10000 65535"
-sudo sysctl -w net.ipv4.tcp_tw_reuse=1
-
-# Disable swap during benchmarking (swap skews latency)
-sudo swapoff -a
-```
+> **Kiểm tra cài đặt thành công:**
+> ```powershell
+> docker --version    # Docker Desktop v24+
+> node --version      # v20.x.x
+> k6 version          # v0.49+
+> ```
 
 ---
 
-## Quick Start
+## Chạy nhanh (Windows — Docker Desktop)
 
-```bash
-# 1. Clone / unzip this project
+Mở **PowerShell** và chạy theo thứ tự:
+
+```powershell
+# 1. Clone repo
+git clone https://github.com/nguyenviet212002/ttv-ccu-bench.git
 cd ttv-ccu-bench
 
-# 2. Copy env file
-cp .env.example .env
+# 2. Copy file cấu hình
+copy .env.example .env
 
-# 3. Run everything (schema + seed + all 8 benchmarks)
-chmod +x scripts/*.sh
-./scripts/run-all.sh
+# 3. Build API image (chỉ cần làm 1 lần)
+docker compose build api
+
+# 4. Cài thư viện cho seed script
+npm install
+
+# 5. Chạy toàn bộ benchmark (tự động hoàn toàn)
+.\scripts\run-all.ps1
 ```
 
-The script will:
-1. Start Docker stack (Postgres + 5× Redis + NestJS API + Prometheus + Grafana)
-2. Run schema migration
-3. Seed 500k workers + 100k jobs (~90 seconds)
-4. Run all 8 benchmarks in sequence
-5. Write results to `results/`
-6. Print PASS/FAIL summary
+**Script tự động làm:**
+1. Khởi động Docker stack (Postgres + 5×Redis + NestJS API + Prometheus + Grafana)
+2. Chạy schema migration (tạo 8 bảng)
+3. Seed 500,000 workers + 100,000 jobs (~60 giây)
+4. Warmup API
+5. Chạy 8 benchmark B1 → B8 lần lượt (~100 phút tổng)
+6. Kiểm tra SQL ledger (tiêu chí 13 + 14)
+7. In bảng PASS/FAIL tổng kết
 
-After completion, fill in `RESULTS.md` and submit.
+Sau khi xong → điền kết quả vào `RESULTS.md` → nộp cho khách hàng.
 
 ---
 
-## Individual Benchmark Run
+## Chạy từng benchmark riêng lẻ
 
-```bash
-# Set environment
-export API_BASE_URL=http://localhost:3000
-export BENCH_TOKEN=<jwt-token>  # optional, some endpoints skip auth in bench mode
+```powershell
+# Set biến môi trường một lần
+$env:API_BASE_URL = "http://localhost:3000"
+$env:BENCH_TOKEN  = "benchmark-token-skip-auth"
 
-# Run specific benchmark
-k6 run --summary-export=results/b1_redis_geo_summary.json k6/b1_redis_geo.js
-k6 run --summary-export=results/b2_price_api_summary.json k6/b2_price_api.js
-k6 run --summary-export=results/b3_node_max_rps_summary.json k6/b3_node_max_rps.js
-k6 run --summary-export=results/b4_ws_sustained_summary.json k6/b4_ws_sustained.js
-k6 run --summary-export=results/b5_pg_writes_summary.json k6/b5_pg_writes.js
-k6 run --summary-export=results/b6_matching_e2e_summary.json k6/b6_matching_e2e.js
-k6 run --summary-export=results/b7_payment_concurrent_summary.json k6/b7_payment_concurrent.js
-k6 run --summary-export=results/b8_full_5k_ccu_summary.json k6/b8_full_5k_ccu.js
+# Chạy từng benchmark
+k6 run --summary-export=results\b1_redis_geo_summary.json     --env API_BASE_URL=$env:API_BASE_URL k6\b1_redis_geo.js
+k6 run --summary-export=results\b2_price_api_summary.json     --env API_BASE_URL=$env:API_BASE_URL k6\b2_price_api.js
+k6 run --summary-export=results\b3_node_max_rps_summary.json  --env API_BASE_URL=$env:API_BASE_URL k6\b3_node_max_rps.js
+k6 run --summary-export=results\b4_ws_sustained_summary.json  --env API_BASE_URL=$env:API_BASE_URL k6\b4_ws_sustained.js
+k6 run --summary-export=results\b5_pg_writes_summary.json     --env API_BASE_URL=$env:API_BASE_URL k6\b5_pg_writes.js
+k6 run --summary-export=results\b6_matching_e2e_summary.json  --env API_BASE_URL=$env:API_BASE_URL k6\b6_matching_e2e.js
+k6 run --summary-export=results\b7_payment_concurrent_summary.json --env API_BASE_URL=$env:API_BASE_URL k6\b7_payment_concurrent.js
+k6 run --summary-export=results\b8_full_5k_ccu_summary.json   --env API_BASE_URL=$env:API_BASE_URL k6\b8_full_5k_ccu.js
 ```
 
 ---
 
-## Project Structure
+## Thời gian chạy
+
+| Benchmark | Mô tả | Thời gian |
+|---|---|---|
+| B1 Redis GEO | GEOSEARCH 500k points, p99 < 10ms | ~6 phút |
+| B2 Price API | Pure compute, p95 < 100ms | ~4 phút |
+| B3 Max RPS | Tìm max RPS ≥ 5,000 | ~14 phút |
+| B4 WebSocket | 10,000 WS connections × 30 phút | **30 phút** |
+| B5 PG Writes | ≥ 500 TPS, p95 < 50ms | ~10 phút |
+| B6 Matching E2E | Full pipeline p95 < 2s | ~3 phút |
+| B7 Payment IPN | Idempotency + ledger consistency | ~2 phút |
+| B8 Full 5K CCU | Tất cả user groups × 30 phút | **30 phút** |
+| **Tổng cộng** | | **~100 phút** |
+
+---
+
+## Xem kết quả
+
+```powershell
+# Xem file kết quả
+ls results\
+
+# Xem chi tiết 1 benchmark
+Get-Content results\b2_price_api_summary.json | ConvertFrom-Json | ConvertTo-Json -Depth 3
+
+# Mở Grafana dashboard (admin / admin)
+start http://localhost:3001
+```
+
+---
+
+## Services và Ports
+
+| Service | URL | Thông tin đăng nhập |
+|---|---|---|
+| NestJS API | http://localhost:3000 | — |
+| API Health | http://localhost:3000/api/v1/health/snapshot | — |
+| Grafana | http://localhost:3001 | admin / admin |
+| Prometheus | http://localhost:9090 | — |
+| PostgreSQL | localhost:5432 | ttv / ttv_pass |
+| Redis Session | localhost:6379 | — |
+| Redis GEO | localhost:6381 | — |
+
+---
+
+## Cấu trúc dự án
 
 ```
 ttv-ccu-bench/
-├── docker-compose.yml        # Full stack: Postgres, 5×Redis, API, Prometheus, Grafana
-├── .env.example              # Environment variables template
-├── api/                      # NestJS API (realistic, hits real PG + Redis)
+├── docker-compose.yml        # Toàn bộ stack: Postgres, 5×Redis, API, Prometheus, Grafana
+├── .env.example              # Mẫu biến môi trường
+├── package.json              # Dependencies cho seed script (pg + ioredis)
+├── api/                      # NestJS API — kết nối thật PG + Redis
 │   ├── src/
-│   │   ├── main.ts
-│   │   ├── cluster.ts        # PM2-style cluster fork
-│   │   ├── app.module.ts
-│   │   ├── redis/            # 5 Redis instances injected
-│   │   ├── database/         # PgBouncer pool
-│   │   ├── common/
-│   │   │   ├── middleware/   # RequestId, JwtAuth
-│   │   │   └── interceptors/ # Prometheus metrics
+│   │   ├── main.ts           # Bootstrap + helmet + validation
+│   │   ├── cluster.ts        # Fork theo số CPU
 │   │   ├── modules/
-│   │   │   ├── auth/         # OTP request/verify → JWT + Redis session
+│   │   │   ├── auth/         # OTP → JWT → Redis session
 │   │   │   ├── jobs/         # calculate-price, create-job, accept-job
-│   │   │   ├── workers/      # GPS update (Redis GEO only), nearby
-│   │   │   ├── sos/          # SOS trigger → P0 queue + WS broadcast
-│   │   │   ├── payments/     # IPN webhook with idempotency + double-entry ledger
+│   │   │   ├── workers/      # GPS (Redis GEO only, không ghi PG)
+│   │   │   ├── sos/          # SOS → P0 queue + WebSocket broadcast
+│   │   │   ├── payments/     # IPN webhook, idempotency, double-entry ledger
 │   │   │   └── health/       # /health/snapshot + /metrics
-│   │   └── gateways/         # Socket.io WebSocket: /worker /customer /admin
-│   ├── package.json
-│   ├── tsconfig.json
+│   │   └── gateways/         # Socket.io: /worker /customer /admin
 │   └── Dockerfile
 ├── seed/
-│   ├── 01_schema.sql         # PostGIS + 8 tables + indexes + triggers
+│   ├── 01_schema.sql         # 8 bảng + PostGIS + indexes
 │   ├── 02_seed_workers.sql   # 10k customers + 50 admins
-│   └── 03_seed_jobs.js       # 500k workers + 100k jobs + Redis GEO load
+│   └── 03_seed_jobs.js       # 500k workers + 100k jobs + Redis GEO
 ├── k6/
-│   ├── b1_redis_geo.js       # GEORADIUS p99 < 10ms @ 500k points
-│   ├── b2_price_api.js       # Price endpoint p95 < 100ms
-│   ├── b3_node_max_rps.js    # Find max RPS (target ≥ 5000 RPS)
-│   ├── b4_ws_sustained.js    # 10k WS × 30 min, disconnect < 1%
-│   ├── b5_pg_writes.js       # DB writes ≥ 500 TPS, p95 < 50ms
-│   ├── b6_matching_e2e.js    # Full match pipeline p95 < 2s
-│   ├── b7_payment_concurrent.js  # Idempotency + ledger consistency
-│   └── b8_full_5k_ccu.js    # All 5k CCU groups × 30 min
+│   ├── b1_redis_geo.js       # B1: Redis GEO benchmark
+│   ├── b2_price_api.js       # B2: Price API
+│   ├── b3_node_max_rps.js    # B3: Max RPS
+│   ├── b4_ws_sustained.js    # B4: WebSocket 30 phút
+│   ├── b5_pg_writes.js       # B5: PostgreSQL writes
+│   ├── b6_matching_e2e.js    # B6: Matching end-to-end
+│   ├── b7_payment_concurrent.js  # B7: Payment IPN
+│   └── b8_full_5k_ccu.js    # B8: Full 5K CCU (benchmark chính)
 ├── scripts/
-│   ├── run-all.sh            # Orchestrates full benchmark run
-│   ├── collect-metrics.sh    # Prometheus snapshot
-│   └── reset-db.sh           # Wipe all data (--confirm required)
-├── grafana/
-│   ├── prometheus.yml
-│   └── provisioning/
-│       ├── datasources/
-│       └── dashboards/
-├── results/                  # Created at runtime, holds JSON summaries + logs
-└── RESULTS.md                # Template to fill in and submit to client
+│   ├── run-all.ps1           # Windows: chạy toàn bộ tự động
+│   ├── run-all.sh            # Linux/Mac: chạy toàn bộ tự động
+│   ├── collect-metrics.sh    # Snapshot Prometheus
+│   └── reset-db.sh           # Xóa toàn bộ data (cần --confirm)
+├── grafana/                  # Cấu hình Prometheus + Grafana
+├── results/                  # JSON + logs (tạo tự động khi chạy)
+└── RESULTS.md                # Template điền kết quả để nộp khách hàng
 ```
 
 ---
 
-## Services and Ports
+## 15 Tiêu chí nghiệm thu (Acceptance Criteria)
 
-| Service | Port | Credentials |
-|---|---|---|
-| NestJS API | 3000 | — |
-| PostgreSQL | 5432 | ttv / ttv_pass |
-| PgBouncer | 5433 | ttv / ttv_pass |
-| Redis Session | 6379 | — |
-| Redis Cache | 6380 | — |
-| Redis GEO | 6381 | — |
-| Redis Queue | 6382 | — |
-| Redis PubSub | 6383 | — |
-| Prometheus | 9090 | — |
-| Grafana | 3001 | admin / admin |
-
----
-
-## API Endpoints
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/api/v1/auth/otp/request` | Public | Request OTP |
-| POST | `/api/v1/auth/otp/verify` | Public | Verify OTP → JWT |
-| POST | `/api/v1/jobs/calculate-price` | Public | Pure-compute price |
-| POST | `/api/v1/jobs` | JWT | Create job + match |
-| POST | `/api/v1/jobs/:id/accept` | JWT | Worker accepts job |
-| POST | `/api/v1/workers/me/gps` | JWT | Update GPS (Redis only) |
-| GET | `/api/v1/workers/nearby?lat=&lon=` | Public | GEORADIUS top 20 |
-| POST | `/api/v1/sos/trigger` | JWT | Trigger SOS alert |
-| POST | `/api/v1/payments/webhook` | Public | IPN webhook |
-| GET | `/api/v1/health/snapshot` | Public | Health + metrics JSON |
-| GET | `/metrics` | Public | Prometheus metrics |
-
----
-
-## Workload Definition (5,000 CCU)
-
-| Group | Count | GPS interval | HTTP req/min |
-|---|---:|---|---:|
-| Worker standby | 2,000 | 30–60 s | 2 |
-| Worker en route | 500 | 10–15 s | 6 |
-| Customer browsing | 1,500 | — | 8 |
-| Customer tracking (WS) | 700 | — | 1 |
-| Admin/Dispatcher | 50 | — | 12 |
-| Job burst | 500 jobs/10min | — | — |
-
-**Total WebSocket connections:** 3,250  
-**GPS updates/sec (peak):** ~200/s  
-**HTTP RPS (peak with job burst):** ~500/s
-
----
-
-## Acceptance Criteria (All 15 must PASS)
-
-| # | Metric | Threshold |
-|:---:|---|---|
-| 1 | API p95 normal | < 300 ms |
-| 2 | API p99 normal | < 800 ms |
-| 3 | Matching p95 E2E | < 2,000 ms |
-| 4 | SOS to dispatcher | < 5,000 ms |
-| 5 | WS abnormal disconnect | < 1% |
-| 6 | GPS lag active job | < 20 s |
-| 7 | Redis memory | < 70% cap |
-| 8 | DB CPU | < 70% |
-| 9 | DB replica lag | < 2 s |
-| 10 | Queue delay normal | < 60 s |
-| 11 | Queue delay SOS | < 5 s |
-| 12 | Error rate | < 0.5% |
-| 13 | **Ledger mismatch** | **= 0 (absolute)** |
-| 14 | **Duplicate charges** | **= 0 (absolute)** |
-| 15 | **Job state lost on restart** | **= 0 (absolute)** |
+| # | Metric | Ngưỡng | Đo bởi |
+|:---:|---|---|---|
+| 1 | API p95 (normal) | < 300 ms | B3, B8 |
+| 2 | API p99 (normal) | < 800 ms | B3, B8 |
+| 3 | Matching p95 E2E | < 2,000 ms | B6, B8 |
+| 4 | SOS đến dispatcher | < 5,000 ms | B8 |
+| 5 | WS abnormal disconnect | < 1% | B4, B8 |
+| 6 | GPS lag active job | < 20 s | B8 |
+| 7 | Redis memory | < 70% cap | B8 (Prometheus) |
+| 8 | DB CPU | < 70% | B8 (host) |
+| 9 | DB replication lag | < 2 s | B5, B8 |
+| 10 | Queue delay (normal) | < 60 s | B8 |
+| 11 | Queue delay (SOS) | < 5 s | B8 |
+| 12 | Error rate | < 0.5% | Tất cả |
+| 13 | **Ledger mismatch** | **= 0** | B7 SQL |
+| 14 | **Duplicate charges** | **= 0** | B7 SQL |
+| 15 | **Job state mất khi restart** | **= 0** | Manual chaos |
 
 ---
 
 ## Troubleshooting
 
-### "API did not become ready"
-```bash
+### `docker` không nhận trong PowerShell
+Docker Desktop chưa mở hoặc chưa cài đúng. Mở **Docker Desktop** từ Start Menu, đợi icon dưới taskbar chuyển thành running (icon cá voi không còn loading), rồi mở lại PowerShell.
+
+### API không start (`docker compose logs api`)
+```powershell
 docker compose logs api
-# Common: port conflict on 3000, increase sleep in run-all.sh
+# Kiểm tra lỗi — thường là port 3000 bị chiếm
+# Đổi port trong .env: PORT=3001
 ```
 
-### k6 "too many open files"
-```bash
+### Seed script lỗi `Cannot find module 'pg'`
+```powershell
+# Chạy npm install ở thư mục gốc trước
+npm install
+node seed/03_seed_jobs.js
+```
+
+### k6 lỗi `too many open files` (B4, B8)
+```powershell
+# Trên Windows Docker Desktop không cần ulimit
+# Nếu chạy k6 trên Linux riêng:
 ulimit -n 65536
-# Then re-run the benchmark
 ```
 
-### "dial tcp: too many open files" in k6 WebSocket test
-```bash
-sysctl -w net.ipv4.ip_local_port_range="10000 65535"
-sysctl -w net.ipv4.tcp_tw_reuse=1
+### Reset và chạy lại từ đầu
+```powershell
+# Dừng và xóa tất cả containers + volumes
+docker compose down -v
+
+# Xóa kết quả cũ
+Remove-Item results\*.json, results\*.log -ErrorAction SilentlyContinue
+
+# Chạy lại
+.\scripts\run-all.ps1
 ```
 
-### Seed script slow or crashes
-```bash
-# Increase Postgres shared_buffers or reduce BATCH_SIZE in seed/03_seed_jobs.js
-# Default is 1000 rows per batch
-```
-
-### Reset everything and start fresh
-```bash
-./scripts/reset-db.sh --confirm
-./scripts/run-all.sh --force
-```
-
-### Run k6 on separate machine (recommended for B8)
-```bash
-# On load generator machine:
-export API_BASE_URL=http://<server-ip>:3000
-k6 run k6/b8_full_5k_ccu.js
+### Chạy k6 trên máy riêng (khuyến nghị cho B8)
+```powershell
+# Máy riêng trỏ vào server target
+$env:API_BASE_URL = "http://<server-ip>:3000"
+k6 run k6\b8_full_5k_ccu.js
 ```
 
 ---
 
-## Hardware Recommendation
+## Hardware khuyến nghị (để có số chính xác)
 
-For accurate results on target hardware (Contabo VPS 30 — 8 vCPU / 24 GB):
-- Run Docker stack on the **target VPS**
-- Run k6 on a **separate machine** (same datacenter/region) to avoid self-contention
-- k6 for B8 needs ~4 GB RAM and 4 vCPU itself
+Benchmark B8 (Full 5K CCU) cần tài nguyên lớn:
+
+| Phần | Khuyến nghị |
+|---|---|
+| Server chạy Docker stack | VPS ≥ 8 vCPU / 16 GB RAM (target: Contabo VPS 30) |
+| Máy chạy k6 | Máy riêng ≥ 4 CPU / 8 GB RAM — **không** chạy k6 và server cùng máy |
+| Network | Cùng datacenter / cùng region để giảm latency |
 
 ---
 
