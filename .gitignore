@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+api/node_modules/
+
+# Build output
+api/dist/
+
+# Environment secrets
+.env
+*.env.local
+
+# Benchmark results (generated at runtime)
+results/*.json
+results/*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Docker volumes (local only)
+data/

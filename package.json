@@ -1,0 +1,13 @@
+﻿{
+  "name": "ttv-ccu-bench-seed",
+  "version": "1.0.0",
+  "description": "Root package — seed script dependencies",
+  "private": true,
+  "scripts": {
+    "seed": "node seed/03_seed_jobs.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.3.2",
+    "pg": "^8.11.3"
+  }
+}

@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'ttv-api'
+    static_configs:
+      - targets: ['api:3000']
+    metrics_path: '/metrics'
+
+  - job_name: 'redis-session'
+    static_configs:
+      - targets: ['redis-session:6379']
+
+  - job_name: 'redis-geo'
+    static_configs:
+      - targets: ['redis-geo:6379']
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']

@@ -1,0 +1,254 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: ttv_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ttv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ttv_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-ttv}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./seed:/seed:ro
+    ports:
+      - "5432:5432"
+    command: >
+      postgres
+        -c max_connections=300
+        -c shared_buffers=2GB
+        -c effective_cache_size=6GB
+        -c maintenance_work_mem=256MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=64MB
+        -c work_mem=16MB
+        -c min_wal_size=1GB
+        -c max_wal_size=4GB
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ttv -d ttv"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ttv_pgbouncer
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-ttv}:${POSTGRES_PASSWORD:-ttv_pass}@postgres:5432/${POSTGRES_DB:-ttv}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 25
+      SERVER_RESET_QUERY: DISCARD ALL
+      IGNORE_STARTUP_PARAMETERS: statement_timeout
+    ports:
+      - "5433:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-session:
+    image: redis:7.2-alpine
+    container_name: ttv_redis_session
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+        --maxmemory 2gb
+        --maxmemory-policy allkeys-lru
+        --save ""
+        --appendonly no
+        --tcp-backlog 511
+        --tcp-keepalive 300
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-cache:
+    image: redis:7.2-alpine
+    container_name: ttv_redis_cache
+    ports:
+      - "6380:6379"
+    command: >
+      redis-server
+        --maxmemory 1gb
+        --maxmemory-policy allkeys-lru
+        --save ""
+        --appendonly no
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-geo:
+    image: redis:7.2-alpine
+    container_name: ttv_redis_geo
+    ports:
+      - "6381:6379"
+    command: >
+      redis-server
+        --maxmemory 3gb
+        --maxmemory-policy noeviction
+        --save ""
+        --appendonly no
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 3G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-queue:
+    image: redis:7.2-alpine
+    container_name: ttv_redis_queue
+    ports:
+      - "6382:6379"
+    command: >
+      redis-server
+        --maxmemory 1gb
+        --maxmemory-policy noeviction
+        --save ""
+        --appendonly no
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-pubsub:
+    image: redis:7.2-alpine
+    container_name: ttv_redis_pubsub
+    ports:
+      - "6383:6379"
+    command: >
+      redis-server
+        --maxmemory 1gb
+        --maxmemory-policy allkeys-lru
+        --save ""
+        --appendonly no
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: ttv_api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ttv}:${POSTGRES_PASSWORD:-ttv_pass}@postgres:5432/${POSTGRES_DB:-ttv}
+      REDIS_SESSION_URL: redis://redis-session:6379
+      REDIS_CACHE_URL: redis://redis-cache:6379
+      REDIS_GEO_URL: redis://redis-geo:6379
+      REDIS_QUEUE_URL: redis://redis-queue:6379
+      REDIS_PUBSUB_URL: redis://redis-pubsub:6379
+      JWT_SECRET: ${JWT_SECRET:-ttv_jwt_secret_benchmark_2026}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-session:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      redis-geo:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      redis-pubsub:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 6G
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: ttv_prometheus
+    volumes:
+      - ./grafana/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=24h'
+      - '--web.enable-admin-api'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: ttv_grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  prometheus_data:
+  grafana_data:

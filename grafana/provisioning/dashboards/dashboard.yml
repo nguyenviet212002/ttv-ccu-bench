@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'TingTingVac'
+    orgId: 1
+    folder: 'TTV Benchmark'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
