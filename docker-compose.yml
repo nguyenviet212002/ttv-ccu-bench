@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    image: ttv-postgres:16
     container_name: ttv_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ttv}
