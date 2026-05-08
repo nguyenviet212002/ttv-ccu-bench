@@ -99,12 +99,12 @@ async function seedWorkerProfiles() {
       const rating = (4.0 + Math.random()).toFixed(2);
       const trust = randInt(60, 100);
 
-      values.push(`($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, ST_SetSRID(ST_MakePoint($${pIdx++}, $${pIdx++}), 4326))`);
-      params.push(slice[i], name, rating, trust, 1, status, lon, lat);
+      values.push(`($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`);
+      params.push(slice[i], name, rating, trust, 1, status, lat, lon);
     }
 
     await pool.query(
-      `INSERT INTO workers (user_id, name, rating, trust_score, trust_level, status, last_location)
+      `INSERT INTO workers (user_id, name, rating, trust_score, trust_level, status, last_lat, last_lon)
        VALUES ${values.join(',')}
        ON CONFLICT DO NOTHING`,
       params
@@ -123,9 +123,7 @@ async function loadWorkersToRedisGeo() {
   const start = Date.now();
 
   const { rows: workers } = await pool.query(
-    `SELECT w.id, ST_Y(w.last_location::geometry) AS lat, ST_X(w.last_location::geometry) AS lon
-     FROM workers w
-     WHERE w.last_location IS NOT NULL`
+    `SELECT id, last_lat AS lat, last_lon AS lon FROM workers WHERE last_lat IS NOT NULL`
   );
   console.log(`  Loading ${workers.length} workers into Redis GEO...`);
 

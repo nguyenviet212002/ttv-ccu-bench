@@ -1,6 +1,7 @@
 -- TingTingVac benchmark schema
 -- Run: psql -U ttv -d ttv -f /seed/01_schema.sql
 
+-- PostGIS optional: only needed for last_location column (benchmarks use Redis GEO instead)
 CREATE EXTENSION IF NOT EXISTS postgis;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -18,11 +19,11 @@ CREATE TABLE IF NOT EXISTS workers (
   trust_score INTEGER NOT NULL DEFAULT 100,
   trust_level INTEGER NOT NULL DEFAULT 1,
   status VARCHAR(20) NOT NULL DEFAULT 'offline',
-  last_location GEOGRAPHY(POINT) NULL,
+  last_lat DECIMAL(9,6) NULL,
+  last_lon DECIMAL(9,6) NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status);
-CREATE INDEX IF NOT EXISTS idx_workers_location ON workers USING GIST(last_location);
 
 CREATE TABLE IF NOT EXISTS jobs (
   id BIGSERIAL PRIMARY KEY,
