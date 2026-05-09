@@ -179,7 +179,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      NODE_OPTIONS: "--max-old-space-size=4096 --optimize-for-size"
+      NODE_OPTIONS: "--max-old-space-size=4096"
       DATABASE_URL: postgresql://${POSTGRES_USER:-ttv}:${POSTGRES_PASSWORD:-ttv_pass}@postgres:5432/${POSTGRES_DB:-ttv}
       REDIS_SESSION_URL: redis://redis-session:6379
       REDIS_CACHE_URL: redis://redis-cache:6379

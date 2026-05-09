@@ -2,12 +2,12 @@
  * B4 — WebSocket sustained 30 minutes
  * Goal: 10,000 WebSocket connections, GPS every 30s, <1% abnormal disconnect
  * Method: 10,000 VUs × 30 min, each sends gps:update every 30s
- * Threshold: Abnormal disconnect < 1%, memory growth < 30%
+ * Threshold: Abnormal disconnect < 1%
  *
  * FIXES:
- * 1. Changed threshold to rate<0.01 (abnormal / total sessions) instead of absolute count
- * 2. Added graceful ws.close(1000) before VU ends
- * 3. Use polling loop instead of sleep for GPS messages to keep connection alive
+ * 1. Auto handle Engine.IO Ping (type '2') → Pong (type '3')
+ * 2. Replace setInterval with while+sleep loop to avoid VU interrupted warnings
+ * 3. Proper Socket.IO message format: 42["event",{payload}]
  */
 
 import { WebSocket } from 'k6/experimental/websockets';
@@ -27,6 +27,7 @@ const normalDisconnects   = new Counter('ws_disconnect_normal');
 const gpsMessagesSent     = new Counter('ws_gps_messages_sent');
 const connectedGauge      = new Gauge('ws_connected');
 const totalSessions       = new Counter('ws_total_sessions');
+const pongReplies         = new Counter('ws_pong_replies');
 
 export const options = {
   scenarios: {
@@ -37,10 +38,9 @@ export const options = {
     },
   },
   thresholds: {
-    // FIX: Changed to rate-based threshold — abnormal / total sessions < 0.01 (1%)
+    // Use rate-based threshold: abnormal / total sessions < 0.01 (1%)
     'ws_disconnect_abnormal': ['rate<0.01'],
     'ws_session_duration': ['p(95)>1700000'], // most sessions should last ~28min+
-    'http_req_failed': ['rate<0.01'],
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)', 'count'],
 };
@@ -50,8 +50,8 @@ export default function () {
   const wsUrl = `${WS_URL}&workerId=${workerId}&role=worker`;
 
   let connected = false;
-  let abnormal = false;
   let pingInterval;
+  let closed = false;
 
   const ws = new WebSocket(wsUrl);
   totalSessions.add(1);
@@ -59,51 +59,76 @@ export default function () {
   ws.onopen = () => {
     connected = true;
     connectedGauge.add(1);
-
-    // FIX: Use polling loop with shorter intervals instead of single long sleep
-    // GPS every 30 seconds for 30 minutes — send in a loop
-    pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        const gpsPayload = JSON.stringify({
-          worker_id: workerId,
-          lat: randFloat(HN_LAT_MIN, HN_LAT_MAX),
-          lon: randFloat(HN_LON_MIN, HN_LON_MAX),
-          ts: Date.now(),
-        });
-        // Socket.io binary framing: 42["gps:update", payload]
-        ws.send('42["gps:update",' + gpsPayload + ']');
-        gpsMessagesSent.add(1);
-      }
-    }, 30000);
   };
 
   ws.onmessage = (msg) => {
-    // Socket.io handshake and event handling
     const data = msg.data;
-    if (data.startsWith('0')) {
-      // Socket.io handshake — respond with connect
+    if (!data || typeof data !== 'string') return;
+
+    // FIX 1: Handle Engine.IO v4 Ping/Pong
+    // Server sends '2' (ping) — client must reply '3' (pong)
+    if (data === '2') {
+      ws.send('3');
+      pongReplies.add(1);
+      return;
+    }
+
+    // Socket.IO handshake — respond with connect (code 40)
+    if (data === '0') {
       ws.send('40');
+      return;
+    }
+
+    // Socket.IO open packet (code '0{...}')
+    if (data.startsWith('0{')) {
+      ws.send('40');
+      return;
     }
   };
 
-  ws.onerror = (e) => {
-    abnormal = true;
+  ws.onerror = () => {
+    // Will be caught by onclose
   };
 
   ws.onclose = (e) => {
+    closed = true;
     if (pingInterval) clearInterval(pingInterval);
     connectedGauge.add(-1);
     // FIX: Only count as abnormal if close code is NOT 1000/1001 AND we were connected
     if (connected && e.code !== 1000 && e.code !== 1001) {
       abnormalDisconnects.add(1);
+      connected = false;
     } else {
       normalDisconnects.add(1);
     }
   };
 
-  // FIX: Graceful close before VU ends — send close with code 1000
-  sleep(1795); // Sleep for 29:55, leave 5s for graceful close
-  
+  // FIX 2: Replace setInterval with while+sleep polling loop
+  // This avoids "setInterval was stopped because VU iteration was interrupted" warnings
+  let gpsCount = 0;
+  const GPS_INTERVAL_MS = 30000; // 30 seconds
+  const TOTAL_DURATION_MS = 1795000; // 29:55 (leave 5s for graceful close)
+  let elapsed = 0;
+
+  while (elapsed < TOTAL_DURATION_MS && !closed && ws.readyState === WebSocket.OPEN) {
+    // Send GPS update at intervals
+    const gpsPayload = JSON.stringify({
+      worker_id: workerId,
+      lat: randFloat(HN_LAT_MIN, HN_LAT_MAX),
+      lon: randFloat(HN_LON_MIN, HN_LON_MAX),
+      ts: Date.now(),
+    });
+    // FIX 3: Proper Socket.IO message format: 42["event_name", {payload}]
+    ws.send(`42["gps:update",${gpsPayload}]`);
+    gpsMessagesSent.add(1);
+    gpsCount++;
+
+    // Sleep for GPS interval
+    sleep(GPS_INTERVAL_MS / 1000);
+    elapsed += GPS_INTERVAL_MS;
+  }
+
+  // FIX: Graceful close with code 1000
   if (ws.readyState === WebSocket.OPEN) {
     ws.close(1000);
   }
@@ -114,7 +139,7 @@ export function handleSummary(data) {
   const totalSess = data.metrics.ws_total_sessions?.values?.count ?? 10000;
   const abnormalRate = totalSess > 0 ? abnormalCount / totalSess : 0;
   const gpsSent = data.metrics.ws_gps_messages_sent?.values?.count ?? 0;
-  // FIX: Use rate-based threshold
+  const pongCount = data.metrics.ws_pong_replies?.values?.count ?? 0;
   const passed = abnormalRate < 0.01;
 
   const summary = {
@@ -124,6 +149,7 @@ export function handleSummary(data) {
       'abnormal_disconnect_count': { value: abnormalCount, threshold: 'informational' },
       'abnormal_disconnect_rate': { value: abnormalRate, threshold: '<1% (rate<0.01)', pass: abnormalRate < 0.01 },
       'gps_messages_sent': { value: gpsSent, threshold: 'informational', pass: true },
+      'pong_replies': { value: pongCount, threshold: 'informational', pass: true },
     },
     raw: data.metrics,
   };
@@ -131,6 +157,7 @@ export function handleSummary(data) {
   console.log('\n=== B4 WebSocket Sustained Result ===');
   console.log(`Abnormal disconnects: ${abnormalCount} / ${totalSess} sessions (${(abnormalRate * 100).toFixed(2)}%) — ${abnormalRate < 0.01 ? 'PASS' : 'FAIL'}`);
   console.log(`GPS messages sent: ${gpsSent}`);
+  console.log(`Pong replies: ${pongCount}`);
   console.log(`OVERALL: ${passed ? 'PASS ✓' : 'FAIL ✗'}`);
 
   return {

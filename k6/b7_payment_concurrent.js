@@ -71,7 +71,11 @@ export default function () {
       status: 'SUCCESS',
     }),
     {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // FIX: Add Idempotency-Key to handle duplicate detection server-side
+        'Idempotency-Key': transactionId,
+      },
       tags: { type: 'payment_ipn' },
       timeout: '10s',
     },
@@ -80,8 +84,9 @@ export default function () {
   let body;
   try { body = JSON.parse(res.body); } catch { body = {}; }
 
+  // FIX: Accept 200 (processed), 409 (idempotent conflict — still a pass)
   const ok = check(res, {
-    'status 200': r => r.status === 200,
+    'status 200 or 409': r => r.status === 200 || r.status === 409,
     'processed or duplicate': () => body.status === 'processed' || body.idempotent === true,
   });
   errorRate.add(!ok);
