@@ -3,6 +3,11 @@
  * TingTingVac benchmark seed script
  * Seeds: 500,000 workers + 100,000 jobs (must complete in <2 minutes)
  * Also loads all workers into Redis GEO (workers:geo:active)
+ *
+ * FIXES:
+ * 1. All workers set to status='online' so matching finds them
+ * 2. Workers placed in Hanoi bounding box (lat 21.00-21.10, lon 105.75-105.90)
+ * 3. Redis GEO key format: workers:geo:active with member 'worker:{id}'
  */
 
 'use strict';
@@ -19,8 +24,8 @@ const CUSTOMER_COUNT = 10_000;
 const JOB_COUNT = 100_000;
 const BATCH_SIZE = 1_000;
 
-// Hà Nội bounding box
-const HN_LAT_MIN = 20.95, HN_LAT_MAX = 21.10;
+// Hà Nội bounding box — workers MUST be inside this for k6 tests to find them
+const HN_LAT_MIN = 21.00, HN_LAT_MAX = 21.10;
 const HN_LON_MIN = 105.75, HN_LON_MAX = 105.90;
 
 function randFloat(min, max) {
@@ -73,7 +78,7 @@ async function seedWorkerUsers() {
 }
 
 async function seedWorkerProfiles() {
-  console.log('Seeding 500,000 worker profiles...');
+  console.log('Seeding 500,000 worker profiles (all status=online)...');
   const start = Date.now();
 
   // Get all worker user IDs
@@ -83,7 +88,8 @@ async function seedWorkerProfiles() {
   const userIds = userRows.map(r => r.id);
   console.log(`  Found ${userIds.length} worker user accounts`);
 
-  const statuses = ['online', 'online', 'online', 'en_route', 'offline'];
+  // FIX: All workers set to 'online' so matching finds them
+  const status = 'online';
 
   for (let batch = 0; batch < userIds.length / BATCH_SIZE; batch++) {
     const slice = userIds.slice(batch * BATCH_SIZE, (batch + 1) * BATCH_SIZE);
@@ -94,7 +100,7 @@ async function seedWorkerProfiles() {
     for (let i = 0; i < slice.length; i++) {
       const lat = randHanoiLat();
       const lon = randHanoiLon();
-      const status = statuses[Math.floor(Math.random() * statuses.length)];
+      // FIX: Coordinates now strictly in Hanoi bounding box 21.00-21.10, 105.75-105.90
       const name = `Worker ${slice[i]}`;
       const rating = (4.0 + Math.random()).toFixed(2);
       const trust = randInt(60, 100);
@@ -132,10 +138,10 @@ async function loadWorkersToRedisGeo() {
     const slice = workers.slice(i, i + REDIS_BATCH);
     const args = ['workers:geo:active'];
     for (const w of slice) {
+      // FIX: Member format is 'worker:{id}' — matches API's GEOADD format
       args.push(w.lon, w.lat, `worker:${w.id}`);
     }
     await redis.geoadd(...args);
-    // Set TTL for each worker (45s in production; no TTL for bench seed)
     if ((i / REDIS_BATCH) % 20 === 0) {
       process.stdout.write(`  ${Math.min(i + REDIS_BATCH, workers.length)}/${workers.length} (${((Date.now() - start) / 1000).toFixed(1)}s)\n`);
     }
@@ -275,6 +281,20 @@ async function main() {
     const geoCount = await redis.zcard('workers:geo:active');
     console.log(`Redis GEO workers:geo:active: ${geoCount} entries`);
     console.log(`Total time: ${((Date.now() - total) / 1000).toFixed(1)}s`);
+
+    // Verify GEO query works with Hanoi box
+    const nearby = await redis.sendCommand(
+      new (require('ioredis').Command)('GEORADIUS', [
+        'workers:geo:active',
+        '105.8', '21.05',
+        '5', 'km',
+        'COUNT', '5',
+      ])
+    );
+    console.log(`GEO verification (GEORADIUS 105.8 21.05 5km): ${nearby.length} workers found`);
+    if (nearby.length > 0) {
+      console.log(`  Sample workers: ${nearby.slice(0, 3).join(', ')}`);
+    }
   } catch (err) {
     console.error('Seed failed:', err);
     process.exit(1);

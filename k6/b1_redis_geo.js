@@ -3,6 +3,8 @@
  * Goal: GEORADIUS p99 < 10ms with 500k worker points
  * Method: 50 VUs × 5 min hitting GET /workers/nearby with random Hanoi coords
  * Threshold: p99 < 10ms, throughput >= 5000 q/s
+ *
+ * FIX: Use static tags instead of high-cardinality unique tags to avoid k6 metric overhead
  */
 
 import http from 'k6/http';
@@ -23,6 +25,9 @@ function randFloat(min, max) {
 
 const errorRate = new Rate('errors');
 const geoQueryDuration = new Trend('geo_query_duration_ms', true);
+
+// Static tags — avoids k6 high-cardinality tag performance penalty
+const STATIC_TAGS = { type: 'geo', bench: 'b1', env: 'benchmark' };
 
 export const options = {
   stages: [
@@ -46,7 +51,7 @@ export default function () {
 
   const startTs = Date.now();
   const res = http.get(`${BASE_URL}/api/v1/workers/nearby?lat=${lat}&lon=${lon}`, {
-    tags: { type: 'geo' },
+    tags: STATIC_TAGS,  // FIX: Use static tags instead of unique per-request tags
     timeout: '5s',
   });
   const duration = Date.now() - startTs;

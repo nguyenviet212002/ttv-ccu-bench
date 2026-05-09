@@ -15,6 +15,23 @@ const PUBLIC_PREFIXES = [
   '/metrics',
 ];
 
+/**
+ * In-memory JWT secret cache with TTL.
+ * Avoids reading from env/file on every request — critical for high RPS benchmarks.
+ */
+let cachedSecret: string | null = null;
+let cachedSecretTimestamp = 0;
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function getJwtSecret(): string {
+  const now = Date.now();
+  if (!cachedSecret || now - cachedSecretTimestamp > CACHE_TTL_MS) {
+    cachedSecret = process.env.JWT_SECRET || 'ttv_jwt_secret_benchmark_2026';
+    cachedSecretTimestamp = now;
+  }
+  return cachedSecret;
+}
+
 @Injectable()
 export class JwtAuthMiddleware implements NestMiddleware {
   constructor(@Inject(REDIS_SESSION) private readonly redisSession: Redis) {}
@@ -42,7 +59,8 @@ export class JwtAuthMiddleware implements NestMiddleware {
 
     let payload: any;
     try {
-      payload = jwt.verify(token, process.env.JWT_SECRET || 'ttv_jwt_secret_benchmark_2026');
+      // Use cached secret — avoids repeated env var lookups
+      payload = jwt.verify(token, getJwtSecret());
     } catch {
       throw new UnauthorizedException('Invalid token');
     }

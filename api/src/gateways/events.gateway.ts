@@ -70,8 +70,25 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     else if (role === 'admin') client.join('admin:all');
   }
 
-  handleDisconnect(_client: Socket) {
+  /**
+   * Graceful disconnect handler:
+   * - Close codes 1000 (normal) and 1001 (going away) are expected during test teardown
+   * - Only log/error on truly abnormal disconnects (e.g., transport error, ping timeout)
+   */
+  handleDisconnect(client: Socket) {
     this.connectedCount--;
+    const reason = client.handshake?.query?.disconnectReason || 'unknown';
+    const closeCode = (client as any)._closeCode || 0;
+
+    // Graceful close codes — no error logging
+    if (closeCode === 1000 || closeCode === 1001 || reason === 'transport close') {
+      return;
+    }
+
+    // Abnormal disconnect — log at debug level only (avoids flooding logs in benchmark)
+    if (closeCode !== 1005 && closeCode !== 0) {
+      this.logger.debug(`Abnormal disconnect: code=${closeCode}, reason=${reason}`);
+    }
   }
 
   @SubscribeMessage('gps:update')

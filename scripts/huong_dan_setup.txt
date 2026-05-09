@@ -1,0 +1,158 @@
+╔═══════════════════════════════════════════════════════════════╗
+║  🌐 HƯỚNG DẪN TEST TRÊN VPS ROCKY LINUX                       ║
+║  IP: 103.166.185.115 | User: root | Pass: my4P7Nm0tSK1n7W4    ║
+╚═══════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 1: TẠO SSH KEY TRÊN MÁY WINDOWS CỦA BẠN
+═══════════════════════════════════════════════════════
+
+Mở PowerShell (Run as Administrator) và chạy:
+
+> mkdir "%USERPROFILE%\.ssh" 2>nul
+> ssh-keygen -t rsa -b 4096 -f "%USERPROFILE%\.ssh\id_rsa_vps" -N "" -q
+> type "%USERPROFILE%\.ssh\id_rsa_vps.pub"
+
+📋 Kết quả sẽ in ra public key dạng: ssh-rsa AAAAB3NzaC1yc2E...==
+→ Copy toàn bộ dòng đó (bắt đầu bằng ssh-rsa)
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 2: ADD PUBLIC KEY VÀO VPS DASHBOARD
+═══════════════════════════════════════════════════════
+
+Vào dashboard nhà cung cấp → SSH Keys (bên trái) → Add SSH Key
+→ Paste public key vừa copy
+→ Save
+
+⚠️ QUAN TRỌNG: Nếu server đã tạo trước khi add key, bạn cần:
+   - Vào Instances → chọn server → chọn menu "..." → 
+   - Chọn "Rebuild" hoặc "Add SSH Key" (tùy nhà cung cấp)
+
+Hoặc cách dễ hơn: Vào Console Web trên dashboard, gõ:
+  echo "YOUR_PUBLIC_KEY" >> ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 3: SSH VÀO VPS (từ PowerShell của bạn)
+═══════════════════════════════════════════════════════
+
+> ssh -o StrictHostKeyChecking=no -i "%USERPROFILE%\.ssh\id_rsa_vps" root@103.166.185.115
+
+Nếu chưa có key, dùng password:
+> ssh -o StrictHostKeyChecking=no root@103.166.185.115
+Password: my4P7Nm0tSK1n7W4
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 4: CÀI DOCKER & GIT (gõ trên VPS)
+═══════════════════════════════════════════════════════
+
+SAU KHI SSH VÀO ĐƯỢC, gõ từng lệnh sau:
+
+# Install git
+dnf install -y git
+
+# Install Docker
+dnf install -y dnf-utils yum-utils
+yum-config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl start docker
+systemctl enable docker
+
+# Install Node.js 20
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+dnf install -y nodejs
+
+# Install k6
+curl -s https://dl.k6.io/install.sh | bash
+
+# Kiểm tra
+docker --version && node --version && k6 version && git --version
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 5: CLONE PROJECT & START STACK
+═══════════════════════════════════════════════════════
+
+# Clone project
+cd /root
+git clone https://github.com/nguyenviet212002/ttv-ccu-bench.git
+cd ttv-ccu-bench
+
+# Start Docker stack
+docker compose up -d
+
+# Kiểm tra (đợi 30s cho services start)
+docker compose ps --format "table {{.Name}}\t{{.Status}}"
+
+# Nếu port 5432 bị conflict, sửa port trong docker-compose.yml:
+sed -i 's/"5432:5432"/"5434:5432"/g' docker-compose.yml
+# (dùng port 5434 nếu 5432 bị chiếm)
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 6: SEED DATA (500K workers)
+═══════════════════════════════════════════════════════
+
+cd /root/ttv-ccu-bench
+
+# Seed schema + data
+DATABASE_URL="postgresql://ttv:ttv_pass@localhost:5432/ttv" \
+REDIS_GEO_EXTERNAL_URL="redis://localhost:6381" \
+node seed/03_seed_jobs.js
+
+# Kiểm tra seed data xong chưa
+docker compose exec postgres psql -U ttv -d ttv -c "SELECT COUNT(*) FROM workers;"
+docker compose exec redis-geo redis-cli GEODIST workers:geo:active 1 2 km
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 7: CHẠY BENCHMARK
+═══════════════════════════════════════════════════════
+
+# Chạy từng benchmark theo thứ tự:
+
+# B1: Redis Geo
+k6 run k6/b1_redis_geo.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B2: Price API
+k6 run k6/b2_price_api.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B3: Max RPS (14 phút)
+k6 run k6/b3_node_max_rps.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B5: PG Writes
+k6 run k6/b5_pg_writes.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B6: Matching E2E (3 phút)
+k6 run k6/b6_matching_e2e.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B7: Payment IPN (2 phút)
+k6 run k6/b7_payment_concurrent.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B4: WebSocket (30 phút)
+k6 run k6/b4_ws_sustained.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+# B8: FULL 5K CCU (30 phút) - QUAN TRỌNG NHẤT
+k6 run k6/b8_full_5k_ccu.js --env API_BASE_URL=http://localhost:3000 --env BENCH_TOKEN=benchmark-token-skip-auth
+
+📝 Kết quả sẽ lưu trong thư mục /root/ttv-ccu-bench/results/
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 8: KIỂM TRA LEDGER SAU B7
+═══════════════════════════════════════════════════════
+
+docker compose exec postgres psql -U ttv -d ttv -c \
+"SELECT COALESCE(SUM(CASE WHEN entry_type='debit' THEN amount ELSE -amount END),0) AS mismatch FROM ledger_entries;"
+
+Kết quả phải = 0
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 9: COPY KẾT QUẢ VỀ MÁY WINDOWS
+═══════════════════════════════════════════════════════
+
+Trên PowerShell máy bạn:
+> mkdir c:\Users\Admin\Downloads\LoadTest\ttv-ccu-bench\results\vps 2>nul
+> scp -i "%USERPROFILE%\.ssh\id_rsa_vps" root@103.166.185.115:/root/ttv-ccu-bench/results/*.json c:\Users\Admin\Downloads\LoadTest\ttv-ccu-bench\results\vps\
+
+═══════════════════════════════════════════════════════
+📌 BƯỚC 10: XÓA VPS (khi test xong để khỏi mất phí)
+═══════════════════════════════════════════════════════
+
+Vào dashboard → Instances → chọn server → "Delete" hoặc "Terminate"

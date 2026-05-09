@@ -17,11 +17,11 @@ services:
     command: >
       postgres
         -c max_connections=300
-        -c shared_buffers=2GB
-        -c effective_cache_size=6GB
+        -c shared_buffers=4GB
+        -c effective_cache_size=12GB
         -c maintenance_work_mem=256MB
         -c checkpoint_completion_target=0.9
-        -c wal_buffers=64MB
+        -c wal_buffers=16MB
         -c work_mem=16MB
         -c min_wal_size=1GB
         -c max_wal_size=4GB
@@ -109,15 +109,15 @@ services:
       - "6381:6379"
     command: >
       redis-server
-        --maxmemory 3gb
-        --maxmemory-policy noeviction
+        --maxmemory 4gb
+        --maxmemory-policy allkeys-lru
         --save ""
         --appendonly no
     deploy:
       resources:
         limits:
           cpus: '1.0'
-          memory: 3G
+          memory: 4G
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -179,6 +179,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      NODE_OPTIONS: "--max-old-space-size=4096 --optimize-for-size"
       DATABASE_URL: postgresql://${POSTGRES_USER:-ttv}:${POSTGRES_PASSWORD:-ttv_pass}@postgres:5432/${POSTGRES_DB:-ttv}
       REDIS_SESSION_URL: redis://redis-session:6379
       REDIS_CACHE_URL: redis://redis-cache:6379

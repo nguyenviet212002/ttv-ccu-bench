@@ -20,15 +20,14 @@ export class WorkersService {
   }
 
   async getNearby(lat: number, lon: number): Promise<string[]> {
-    // Use GEOSEARCH (Redis 7.x) — GEORADIUS is deprecated
-    // GEOSEARCH key FROMLONLAT lon lat BYRADIUS 5 km ASC COUNT 20
-    const results = await (this.redisGeo as any).call(
-      'GEOSEARCH',
-      GEO_KEY,
-      'FROMLONLAT', lon, lat,
-      'BYRADIUS', 5, 'km',
-      'ASC',
-      'COUNT', 20,
+    // GEOSEARCH (Redis 7.x) — all args must be strings for ioredis
+    const results = await this.redisGeo.sendCommand(
+      new (require('ioredis').Command)('GEOSEARCH', [
+        GEO_KEY,
+        'FROMLONLAT', String(lon), String(lat),
+        'BYRADIUS', '5', 'km',
+        'ASC', 'COUNT', '20',
+      ])
     ) as string[];
     return results;
   }

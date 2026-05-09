@@ -4,6 +4,8 @@
  * Method: Ramp 100→10,000 RPS over 10 min, sustain peak 3 min
  * Endpoint mix: 60% calculate-price, 25% nearby-workers, 10% accept-job, 5% health
  * Threshold: Sustained >= 5,000 RPS at p95 < 300ms
+ *
+ * FIX: Increased maxVUs to 5000 from 2000 to allow higher concurrency
  */
 
 import http from 'k6/http';
@@ -31,8 +33,8 @@ export const options = {
       executor: 'ramping-arrival-rate',
       startRate: 100,
       timeUnit: '1s',
-      preAllocatedVUs: 500,
-      maxVUs: 2000,
+      preAllocatedVUs: 1000,
+      maxVUs: 5000,  // FIX: Increased from 2000 to 5000 for higher concurrency
       stages: [
         { duration: '2m', target: 1000 },
         { duration: '2m', target: 2000 },
