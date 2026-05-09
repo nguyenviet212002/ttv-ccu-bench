@@ -11,7 +11,6 @@ export class WorkersService {
   constructor(@Inject(REDIS_GEO) private readonly redisGeo: Redis) {}
 
   async updateGps(workerId: number, dto: UpdateGpsDto): Promise<{ ok: boolean }> {
-    // GEOADD + TTL sentinel — NO PostgreSQL write per spec
     const pipeline = this.redisGeo.pipeline();
     pipeline.geoadd(GEO_KEY, dto.lon, dto.lat, `worker:${workerId}`);
     pipeline.setex(`worker:gps:ttl:${workerId}`, GPS_TTL, '1');
@@ -19,39 +18,39 @@ export class WorkersService {
     return { ok: true };
   }
 
-  /**
-   * Cached nearby query — buffers TTL 2s for hot queries.
-   * Fix: Convert Buffer[] → string[] to avoid serialization bug.
-   */
+  // In-memory cache: 2s TTL, keyed by truncated coords (4 decimal places ≈ 11m grid)
   private nearbyCache = new Map<string, { data: string[]; ts: number }>();
-  private readonly CACHE_TTL_MS = 2000; // 2 second cache
+  private readonly CACHE_TTL_MS = 2000;
 
   async getNearby(lat: number, lon: number): Promise<string[]> {
     const cacheKey = `${lat.toFixed(4)}:${lon.toFixed(4)}`;
 
-    // Check cache first
     const cached = this.nearbyCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < this.CACHE_TTL_MS) {
       return cached.data;
     }
 
-    // GEOSEARCH (Redis 7.x) — all args must be strings for ioredis
-    const raw = await this.redisGeo.sendCommand(
-      new (require('ioredis').Command)('GEOSEARCH', [
-        GEO_KEY,
-        'FROMLONLAT', String(lon), String(lat),
-        'BYRADIUS', '5', 'km',
-        'ASC', 'COUNT', '20',
-      ])
+    // ioredis v5: GEOSEARCH via dynamic command call (no require() in hot path)
+    const raw = await (this.redisGeo as any).geosearch(
+      GEO_KEY,
+      'FROMLONLAT', String(lon), String(lat),
+      'BYRADIUS', '5', 'km',
+      'ASC', 'COUNT', '20',
     ) as any[];
 
-    // FIX: Convert Buffer[] → string[] (k6 cannot parse Buffer objects)
-    const results: string[] = raw.map(item =>
+    const results: string[] = (raw ?? []).map((item: any) =>
       Buffer.isBuffer(item) ? item.toString('utf8') : String(item)
     );
 
-    // Store in cache
     this.nearbyCache.set(cacheKey, { data: results, ts: Date.now() });
+
+    // Evict entries older than CACHE_TTL_MS to prevent unbounded growth
+    if (this.nearbyCache.size > 5000) {
+      const cutoff = Date.now() - this.CACHE_TTL_MS;
+      for (const [k, v] of this.nearbyCache) {
+        if (v.ts < cutoff) this.nearbyCache.delete(k);
+      }
+    }
 
     return results;
   }

@@ -13,7 +13,7 @@ services:
       - pg_data:/var/lib/postgresql/data
       - ./seed:/seed:ro
     ports:
-      - "5434:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     command: >
       postgres
         -c max_connections=300
@@ -21,15 +21,17 @@ services:
         -c effective_cache_size=12GB
         -c maintenance_work_mem=256MB
         -c checkpoint_completion_target=0.9
-        -c wal_buffers=16MB
+        -c wal_buffers=64MB
         -c work_mem=16MB
         -c min_wal_size=1GB
         -c max_wal_size=4GB
+        -c synchronous_commit=off
+        -c checkpoint_warning=0
     deploy:
       resources:
         limits:
           cpus: '2.0'
-          memory: 4G
+          memory: 6G
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ttv -d ttv"]
       interval: 10s
@@ -110,14 +112,15 @@ services:
     command: >
       redis-server
         --maxmemory 4gb
-        --maxmemory-policy allkeys-lru
+        --maxmemory-policy noeviction
         --save ""
         --appendonly no
+        --hz 20
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 4G
+          cpus: '2.0'
+          memory: 5G
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -205,8 +208,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4.0'
-          memory: 6G
+          cpus: '8.0'
+          memory: 8G
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     restart: unless-stopped
 
   prometheus:

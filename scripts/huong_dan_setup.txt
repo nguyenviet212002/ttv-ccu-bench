@@ -39,7 +39,7 @@ Hoặc cách dễ hơn: Vào Console Web trên dashboard, gõ:
 > ssh -o StrictHostKeyChecking=no -i "%USERPROFILE%\.ssh\id_rsa_vps" root@103.166.185.115
 
 Nếu chưa có key, dùng password:
-> ssh -o StrictHostKeyChecking=no root@103.166.185.115
+> 
 Password: my4P7Nm0tSK1n7W4
 
 ═══════════════════════════════════════════════════════
