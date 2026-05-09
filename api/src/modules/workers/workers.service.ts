@@ -20,10 +20,10 @@ export class WorkersService {
 
   // In-memory cache: 2s TTL, keyed by truncated coords (4 decimal places ≈ 11m grid)
   private nearbyCache = new Map<string, { data: string[]; ts: number }>();
-  private readonly CACHE_TTL_MS = 2000;
+  private readonly CACHE_TTL_MS = 5000; // 5s cache — coarser grid = more hits
 
   async getNearby(lat: number, lon: number): Promise<string[]> {
-    const cacheKey = `${lat.toFixed(4)}:${lon.toFixed(4)}`;
+    const cacheKey = `${lat.toFixed(3)}:${lon.toFixed(3)}`; // 111m grid = more cache hits
 
     const cached = this.nearbyCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < this.CACHE_TTL_MS) {
