@@ -86,7 +86,7 @@
 | Error rate (timeouts) | < 1% | 46% at 8K target | ❌ (overload) |
 | p95 for successful responses | — | **2,927ms** at overload | ℹ️ |
 
-**Giải thích:** B3 là capacity stress test ramp đến 8,000 RPS — vượt xa năng lực thiết kế. Breaking point ~1,500 RPS cho mixed workload (60% compute + 25% Redis GEO + 10% DB write). 0 lỗi 5xx, chỉ timeout khi queuing. B2 xác nhận pure compute đạt 4,713 RPS. B8 chứng minh cluster 24 workers xử lý 5K CCU tốt ở 279 req/s sustained với p95=6ms.
+**Giải thích:** B3 là capacity stress test ramp đến 8,000 RPS — vượt xa năng lực thiết kế. Breaking point ~1,500 RPS cho mixed workload (60% compute + 25% Redis GEO + 10% DB write). 0 lỗi 5xx, chỉ timeout khi queuing. B2 xác nhận pure compute đạt 4,713 RPS. B8 chứng minh cluster 24 workers xử lý 5K CCU tốt ở 279 req/s sustained với p95=61ms.
 
 **Kết luận:** Breaking point cluster = ~1,500 RPS mixed. Đủ để xử lý 279 req/s của 5K CCU (safety margin 5×).
 
@@ -102,7 +102,7 @@ B3 là **mixed workload stress test** (60% compute + 25% Redis GEO + 10% Postgre
 | B3 — Mixed workload breaking point | **~1,500 RPS** | Điểm bão hòa khi xử lý đồng thời nhiều operations |
 | **B8 — 5K CCU thực tế** | **279 req/s sustained** | **Tải thực tế khi có 5,000 user đồng thời** |
 
-**Kết luận quan trọng:** 5,000 CCU thực tế chỉ tạo ra **279 req/s** HTTP (đo trong B8). Breaking point là **1,500 RPS**. Safety margin = 1,500 / 279 = **5.4×**. Hệ thống có thể hấp thụ tải đột biến gấp 5× trước khi degradation. B3 không phải FAIL — đây là kết quả capacity discovery. Bằng chứng đủ năng lực là **B8: 5K CCU ổn định 30 phút, p95=6ms, error=0%**.
+**Kết luận quan trọng:** 5,000 CCU thực tế chỉ tạo ra **279 req/s** HTTP (đo trong B8). Breaking point là **1,500 RPS**. Safety margin = 1,500 / 279 = **5.4×**. Hệ thống có thể hấp thụ tải đột biến gấp 5× trước khi degradation. B3 không phải FAIL — đây là kết quả capacity discovery. Bằng chứng đủ năng lực là **B8: 5K CCU ổn định 30 phút, p95=61ms, error=0%**.
 
 ---
 
@@ -186,8 +186,8 @@ SELECT COUNT(*) AS dup_ipn FROM (SELECT gateway,transaction_id FROM payment_ipn_
 
 | # | Metric | Ngưỡng | Đo được | Status |
 |---|--------|--------|---------|--------|
-| 1 | API p95 normal | <300ms | **6ms** | ✅ PASS |
-| 2 | API p99 normal | <800ms | **66ms** | ✅ PASS |
+| 1 | API p95 normal | <300ms | **61ms** | ✅ PASS |
+| 2 | API p99 normal | <800ms | **239ms** | ✅ PASS |
 | 3 | Matching p95 E2E | <2,000ms | **35ms** | ✅ PASS |
 | 4 | SOS alert p95 | <5,000ms | **36ms** | ✅ PASS |
 | 5 | WS abnormal disconnects | <1% | **0.00%** (B4: 10,000/10,000 sessions, 30 phút, 0 premature disconnect) | ✅ PASS |
@@ -208,8 +208,8 @@ SELECT COUNT(*) AS dup_ipn FROM (SELECT gateway,transaction_id FROM payment_ipn_
 |----------|---------|
 | Tổng HTTP requests | **510,257** |
 | API throughput | **279 req/s** |
-| API p95 latency | **6ms** 🚀 |
-| API p99 latency | **66ms** |
+| API p95 latency | **61ms** |
+| API p99 latency | **239ms** |
 | Matching p95 | **35ms** 🚀 |
 | SOS p95 | **36ms** 🚀 |
 | Error rate | **0.0%** ✅ |
@@ -230,7 +230,7 @@ SELECT COUNT(*) AS dup_ipn FROM (SELECT gateway,transaction_id FROM payment_ipn_
 | **B5** PG Writes | TPS=3,317, p95=59ms | ≥500 TPS, p95<75ms | ✅ PASS |
 | **B6** Matching E2E | p95=91ms, 96.6% success | p95<2,000ms | ✅ PASS |
 | **B7** Payment IPN | p95=186ms, 0% err | p95<300ms, ledger=0 | ✅ PASS |
-| **B8** Full 5K CCU | p95=6ms, 0% errors | 15 criteria | ✅ PASS |
+| **B8** Full 5K CCU | p95=61ms, 0% errors | 15 criteria | ✅ PASS |
 
 ---
 
