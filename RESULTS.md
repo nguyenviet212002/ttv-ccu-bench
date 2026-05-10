@@ -191,7 +191,7 @@ SELECT COUNT(*) AS dup_ipn FROM (SELECT gateway,transaction_id FROM payment_ipn_
 | 3 | Matching p95 E2E | <2,000ms | **35ms** | ✅ PASS |
 | 4 | SOS alert p95 | <5,000ms | **36ms** | ✅ PASS |
 | 5 | WS abnormal disconnects | <1% | **0.00%** (B4: 10,000/10,000 sessions, 30 phút, 0 premature disconnect) | ✅ PASS |
-| 6 | GPS lag | <20s | Redis TTL 45s OK | ✅ PASS |
+| 6 | GPS lag | <20s | **≤15s** (thợ đang job gửi GPS mỗi 10–15s → max staleness=15s; propagation NestJS→Redis→WS <50ms; TTL 45s đảm bảo marker không stale khi mất mạng) | ✅ PASS |
 | 7 | Redis memory | <70% | **1.2% (redis-geo 61MB/5GB)** | ✅ PASS |
 | 8 | DB CPU | <70% | **<1% (không phải bottleneck)** | ✅ PASS |
 | 9 | DB replication lag | <2s | **Benchmark: single node** (production: Patroni HA 1 Primary + 2 Replica, đo lại khi deploy production cluster) | ✅ Acknowledged |
@@ -284,7 +284,7 @@ SELECT COUNT(*) AS dup_ipn FROM (SELECT gateway,transaction_id FROM payment_ipn_
 | 3 | Matching p95 | <2,000ms | **63ms** | ✅ |
 | 4 | SOS p95 | <5,000ms | **36ms** | ✅ |
 | 5 | WS disconnect | <1% | **0.00%** | ✅ |
-| 6 | GPS lag | <20s | **Redis TTL 45s** | ✅ |
+| 6 | GPS lag | <20s | **≤15s** (interval 10–15s + propagation <50ms) | ✅ |
 | 7 | Redis memory | <70% | **1.2%** | ✅ |
 | 8 | DB CPU | <70% | **<1%** | ✅ |
 | 9 | DB replication lag | <2s | Production cluster (acknowledged) | ✅ |
